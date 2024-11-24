@@ -1,66 +1,84 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, render_template, request, redirect, flash
 import mysql.connector
+from mysql.connector import Error
+from db_config import db_config  # Import the database configuration
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key'
+app.secret_key = "your_secret_key"  # Replace with a secure key for session management
 
-# Configure MySQL connection
-db_config = {
-    'host': 'localhost',
-    'user': 'root',
-    'password': 'your_password',
-    'database': 'login_db'
-}
-
+# Function to establish a database connection
 def get_db_connection():
-    return mysql.connector.connect(**db_config)
+    try:
+        connection = mysql.connector.connect(
+            host=db_config["host"],
+            user=db_config["user"],
+            password=db_config["password"],
+            database=db_config["database"],
+        )
+        if connection.is_connected():
+            print("Connected to the database")
+        return connection
+    except Error as e:
+        print(f"Error connecting to database: {e}")
+        return None
 
-@app.route('/')
+@app.route("/")
 def home():
-    return render_template('login.html')
+    return render_template("login.html")
 
-@app.route('/login', methods=['POST'])
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    username = request.form['username']
-    password = request.form['password']
-    
-    connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM users WHERE username = %s AND password = %s", (username, password))
-    user = cursor.fetchone()
-    cursor.close()
-    connection.close()
-    
-    if user:
-        session['user_id'] = user['id']
-        return redirect(url_for('dashboard'))
-    else:
-        return "Invalid username or password", 401
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
 
-@app.route('/dashboard')
-def dashboard():
-    if 'user_id' not in session:
-        return redirect(url_for('home'))
-    
-    return "Welcome to the dashboard!"
-
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        
         connection = get_db_connection()
-        cursor = connection.cursor()
-        cursor.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (username, password))
-        connection.commit()
-        cursor.close()
-        connection.close()
-        
-        return redirect(url_for('home'))
-    
-    return render_template('register.html')
+        if connection:
+            cursor = connection.cursor(dictionary=True)
+            query = "SELECT * FROM users WHERE username = %s AND password = %s"
+            cursor.execute(query, (username, password))
+            user = cursor.fetchone()
+            cursor.close()
+            connection.close()
 
-if __name__ == '__main__':
-    app.run(debug=True)
+            if user:
+                return "Login Successful"
+            else:
+                flash("Invalid username or password", "error")
+                return redirect("/login")
+        else:
+            flash("Database connection failed", "error")
+            return redirect("/login")
+
+    return render_template("login.html")
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form["username"]
+        password = request.form["password"]
+
+        connection = get_db_connection()
+        if connection:
+            cursor = connection.cursor()
+            query = "INSERT INTO users (username, password) VALUES (%s, %s)"
+            try:
+                cursor.execute(query, (username, password))
+                connection.commit()
+                flash("Registration successful. Please log in.", "success")
+                return redirect("/login")
+            except Error as e:
+                flash(f"Error registering user: {e}", "error")
+                return redirect("/register")
+            finally:
+                cursor.close()
+                connection.close()
+        else:
+            flash("Database connection failed", "error")
+            return redirect("/register")
+
+    return render_template("register.html")
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
 
